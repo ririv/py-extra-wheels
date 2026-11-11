@@ -124,10 +124,30 @@ class UnsupportedPython:
 
 
 @dataclass(frozen=True)
+class BuildFingerprint:
+    artifact: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class AlreadyPublished:
+    library: str
+    python: PythonVersion
+    abi: AndroidABI
+    fingerprint: str
+    wheel: str
+    blob: str
+    reason: Literal["already-published"] = field(
+        init=False, default="already-published"
+    )
+
+
+@dataclass(frozen=True)
 class Plan:
     publication: Publication
     targets: tuple[Target, ...]
-    skipped: tuple[UnsupportedPython | UpstreamUnsupported, ...] = ()
+    skipped: tuple[UnsupportedPython | UpstreamUnsupported | AlreadyPublished, ...] = ()
+    fingerprints: tuple[BuildFingerprint, ...] = ()
 
     def write(self, path: Path) -> None:
         path.write_text(
@@ -136,6 +156,7 @@ class Plan:
                     "publication": self.publication,
                     "targets": [t.to_dict() for t in self.targets],
                     "skipped": [asdict(s) for s in self.skipped],
+                    "fingerprints": [asdict(s) for s in self.fingerprints],
                 },
                 indent=2,
             )
@@ -192,9 +213,31 @@ def load_plan(path: Path) -> Plan:
                 )
             case "upstream-incompatibility":
                 skipped.append(upstream_unsupported(fields))
+            case "already-published":
+                skipped.append(
+                    AlreadyPublished(
+                        fields["library"],
+                        PythonVersion(fields["python"]),
+                        AndroidABI(fields["abi"]),
+                        fields["fingerprint"],
+                        fields["wheel"],
+                        fields["blob"],
+                    )
+                )
             case reason:
                 raise ValueError(f"未知跳过原因：{reason}")
-    plan = Plan(Publication(data["publication"]), tuple(targets), tuple(skipped))
+    fingerprints = tuple(
+        BuildFingerprint(**row) for row in data.get("fingerprints", [])
+    )
+    plan = Plan(
+        Publication(data["publication"]), tuple(targets), tuple(skipped), fingerprints
+    )
     if len({t.artifact for t in plan.targets}) != len(plan.targets):
         raise ValueError("构建计划存在重复目标")
+    if fingerprints and (
+        {f.artifact for f in fingerprints} != {t.artifact for t in targets}
+        or len(fingerprints) != len(targets)
+        or any(not re.fullmatch(r"[a-f0-9]{64}", f.sha256) for f in fingerprints)
+    ):
+        raise ValueError("构建指纹必须完整且唯一地覆盖待构建目标")
     return plan

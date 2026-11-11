@@ -30,6 +30,11 @@ def select_plan(plan: Plan, names: list[str]) -> Plan:
         plan,
         targets=tuple(target for target in plan.targets if target.library in names),
         skipped=tuple(entry for entry in plan.skipped if entry.library in names),
+        fingerprints=tuple(
+            identity
+            for identity in plan.fingerprints
+            if plan.target(identity.artifact).library in names
+        ),
     )
 
 

@@ -7,6 +7,9 @@
 | `scripts/recipes` | 严格解析 TOML、选择受影响包、解析手动选择 |
 | `scripts/pipeline/model.py` | 固定源码、构建目标、构建器枚举与计划 |
 | `scripts/pipeline/planning.py` | 把 Actions 事件转成完整目标矩阵 |
+| `scripts/pipeline/fingerprint.py` | 按构建器、本地导入模块和声明配置计算目标指纹 |
+| `scripts/pipeline/incremental.py` | 根据发布记录移除可复用目标，提供强制重建模式 |
+| `scripts/pipeline/published.py` | 读取 Git 树及发布记录，将新记录绑定到实际 wheel blob |
 | `scripts/pipeline/source.py` | 解析 Git SHA 或官方 sdist，核验明确目录的后端及发行元数据 |
 | `scripts/pipeline/sdists.py` | 校验源码包 SHA-256，安全解包并保留上游发行内容 |
 | `scripts/pipeline/cargo_env.py` | 组合 cibuildwheel 所需的 Cargo 环境配置，保留已有配置 |
@@ -44,7 +47,9 @@
 
 cibuildwheel 与 Chaquopy 的原生 SDK 按 ABI、API、固定依赖、工具链和构建实现缓存，与 Python 版本分离；缓存命中后完整校验文件哈希、权限和符号链接，校验失败直接终止。SDK 成功后立即保存，使后续 Python 绑定构建失败不会丢弃已完成的 SDK。两个构建器通过同一安装模块，将 SDK 复制到各自目标 Python 前缀。
 
-所有目标成功后才进入汇总发布。发布会验证每个预期 artifact，缺少产物、源码错配、哈希不符、目标标签错误、同名内容冲突都会失败。校验通过后以一个提交更新 `wheels`，保留已有文件。不同工作流运行并发提交时，仅在远端确实前进后重新组合提交，最多三次；网络或权限失败直接报告。
+规划先按 Git diff 选择候选包，再核对目标指纹和 `wheels/.build-records/` 中的成功发布记录。Git 树与记录来自同一提交，读取记录使用批量 Git 查询，不下载 wheel。只有指纹相同且 wheel blob 仍存在时才从矩阵移除。构建目标沿用原有并行矩阵；新增 Python/ABI 不会改变其他目标的指纹。构建时重新核对当前代码与计划指纹，产物清单记录该指纹，汇总再次检查。历史计划没有指纹时仍可验证和重打包，但不会被追认为可复用的新构建。详见 [构建范围与强制重建](recipes.md#自动选择构建范围)。
+
+所有待构建目标成功后才进入汇总发布。发布会验证每个预期 artifact，缺少产物、源码错配、哈希不符、目标标签错误、同名内容冲突都会失败。校验通过后以一个提交同时更新 wheel 与对应指纹记录，保留已有文件。不同工作流运行并发提交时，仅在远端确实前进后重新组合提交，最多三次；网络或权限失败直接报告。
 
 `publication=build` 不进入发布。完整产物与远端相同时不创建新提交；发布步骤仍核对下游状态，只在尚未同步时补发事件。正常构建的仓库写权限和 Actions 触发权限只授予汇总发布任务。
 
@@ -72,6 +77,6 @@ uv run python -B -m unittest discover -s scripts/index/tests -v
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 ```
 
-测试覆盖目标路由、固定 SHA、sdist 哈希与发行元数据、两种来源的计划往返、产物缺失与篡改、稳定 ABI、Cargo 配置组合、汇总提交、并发更新重试、无变化不发布，以及不检出 wheel 时的索引生成。测试、字节码、发布与通知逻辑变化不触发 native 构建；这些变化由组件测试和工作流检查验证。编译、源码准备、目标规划和公共构建配置变化仍重建全部 recipe。
+测试覆盖目标路由、固定 SHA、sdist 哈希与发行元数据、两种来源的计划往返、产物缺失与篡改、稳定 ABI、Cargo 配置组合、汇总提交、并发更新重试、无变化不发布，以及不检出 wheel 时的索引生成。测试、字节码、发布与通知逻辑变化不触发 native 构建；这些变化由组件测试和工作流检查验证。编译、源码准备、目标规划和公共构建配置变化会检查全部 recipe，再按目标指纹筛选；实际影响所有目标的修改仍需全量重建。
 
 历史排障笔记位于 `docs/archive/`，不作为当前构建配置或使用说明。

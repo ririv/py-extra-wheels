@@ -165,12 +165,16 @@ maturin 构建还会读取原始 `build-system.requires`，在匹配目标版本
 
 只有相关文件推送到 `main` 才启动统一构建入口，没有定时扫描。
 
-- 修改某个 TOML，只构建对应的包及其默认目标。
-- 修改共享编译代码、源码准备、目标规划或构建工作流，构建所有现存 recipe，延续原来共享代码变化时全量构建的行为。
+- 修改某个 TOML，只检查对应包的默认目标；已发布且构建指纹一致的目标跳过。新增 Python 或 ABI 时只补齐新目标。
+- 修改共享代码或构建工作流，检查全部现存 recipe；只重新构建指纹变化或缺少有效发布记录的目标。真正影响全部构建器的公共编译修改仍会触发全量构建。
 - 删除 recipe 不会重新构建已删除的包；仅删除文件时，空矩阵直接跳过构建。
 - 文档变化不会触发 native wheel 构建。
 
-仅修改测试、发布模块或通知动作不触发 native 构建；这些变化仍运行 CI。修改公共工具或构建配置会重建全部 recipe。
+仅修改测试、发布模块或通知动作不触发 native 构建；这些变化仍运行 CI。构建指纹按实际构建器及其本地 Python 导入模块计算，并纳入固定源码、Python/ABI/API、环境、命令参数、工具配置、选用的原生依赖及许可证配置、明确引用的仓库配置文件。例如修改 Chaquopy 适配器不使 maturin/cibuildwheel 目标失效，修改 OpenBLAS 版本不使没有使用它的包失效。
+
+成功发布时，指纹记录与 wheel 在同一个提交写入 `wheels/.build-records/`。下一次规划通过稀疏检出只读取记录，再以同一提交的 Git 树验证 wheel 路径和 blob 身份，不下载 wheel。记录损坏、网络或权限错误直接报错；缺少记录、wheel 被删除或内容已替换时重新构建。历史产物没有指纹，不能仅凭文件名认定构建输入相同，需要首次构建后才能参与增量跳过。
+
+Actions 摘要显示待构建、已发布和上游不支持的目标数；`build-plan.json` 的 `already-published` 条目记录具体跳过目标。所有目标命中时不创建编译任务，仍按需补发索引同步事件。
 
 规划会先校验全部 recipe，再根据 Git diff 选择目标。新增或重命名的 TOML 可以被识别，不依赖 GitHub push 事件里可能被截断的文件列表。
 
@@ -198,7 +202,11 @@ gh workflow run build-wheels.yml \
 
 `recipes` 可为逗号分隔的包名或 `all`；`python_versions=recipe` 使用各 TOML 的默认集合，也可填写无空格的版本列表。覆盖 `version_tag` 时必须只选择一个使用 Git 源的包，可以同时构建该包的多个 Python 版本。PyPI 源通过修改 TOML 中的 `pypi-version` 升级，不接受 Git ref 覆盖。
 
-`publication=publish` 是默认值，会提交 wheel 并触发现有索引发布链路；`publication=build` 只上传 Actions artifacts，跳过 `wheels` 分支和索引发布。
+`publication=publish` 是默认值，使用 `rebuild=changed` 跳过已验证的相同目标，提交新 wheel 并触发现有索引发布链路。需要重新编译已发布目标时显式设置 `-f rebuild=force`，仍只作用于选中的包和 Python 版本。
+
+`publication=build` 总是构建所选目标，确保提供完整的 Actions artifacts，不更新 `wheels` 或发布记录，也不触发索引发布。临时仓库入口和本地 `plan-local` 同样保持完整构建计划。GitHub 失败任务可使用“Re-run failed jobs”保留同一次运行的成功产物；只有整次计划校验并发布成功后才会写入发布记录。
+
+指纹标识仓库声明的构建输入；`ubuntu-latest`、系统工具以及上游未锁定的构建依赖仍可能随时间变化。如需刷新这些外部环境，使用 `rebuild=force`，不会凭旧产物名称推断环境已经更新。
 
 `manual-wheel-build.yml` 保留为临时仓库构建入口，用于尚未收录进 recipe 的源码；必须明确项目目录（根目录填写 `.`），该目录必须有显式声明受支持后端的 `pyproject.toml`，不再递归猜测子项目；原来的 `wheel-*.yml` 包专用入口由 `build-wheels.yml` 替代。
 

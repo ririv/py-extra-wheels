@@ -64,7 +64,7 @@ GitHub Actions runs the shared pipeline:
 
 For a package using a supported build backend, add `recipes/<package-name>.toml`. Declare its Git repository and ref or a fixed official PyPI sdist version, project directory, build backend, and Android targets. TOML also supports external environment settings, PEP 517 parameters, and native dependencies. New build backends require corresponding builder support first.
 
-All recipes share the same workflows. Merging a recipe change into `main` builds the affected package; changes to shared build code rebuild all recipes.
+All recipes share the same workflows. Recipe changes check the affected package; shared code changes check all recipes. Targets with matching build fingerprints and published wheel blobs are skipped. Use `rebuild=force` to rebuild selected targets. Historical wheels need one recorded build before they can be reused.
 
 For example, build two Python versions and retain the results as Actions artifacts:
 

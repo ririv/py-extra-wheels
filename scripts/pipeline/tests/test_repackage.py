@@ -8,7 +8,14 @@ from pathlib import Path
 from scripts.build.android_python import AndroidABI, PythonVersion
 from scripts.build.tests.test_wheel_abi import elf_with_dependency
 from scripts.pipeline.artifacts import collect, record
-from scripts.pipeline.model import GitSource, Plan, Target, UnsupportedPython, load_plan
+from scripts.pipeline.model import (
+    BuildFingerprint,
+    GitSource,
+    Plan,
+    Target,
+    UnsupportedPython,
+    load_plan,
+)
 from scripts.pipeline.repackage import repackage, select_plan
 from scripts.recipes.model import Backend, Publication
 from scripts.testing.wheels import write_wheel
@@ -27,9 +34,13 @@ class RepackageTests(unittest.TestCase):
             UnsupportedPython(name, PythonVersion.PY310, ">=3.11")
             for name in ("retained", "excluded")
         )
-        plan = select_plan(Plan(Publication.BUILD, targets, skipped), ["retained"])
+        fingerprints = tuple(BuildFingerprint(t.artifact, "b" * 64) for t in targets)
+        plan = select_plan(
+            Plan(Publication.BUILD, targets, skipped, fingerprints), ["retained"]
+        )
         self.assertEqual(plan.targets, targets[:4])
         self.assertEqual(plan.skipped, skipped[:1])
+        self.assertEqual(plan.fingerprints, fingerprints[:4])
         for names in ([], ["unknown"], ["retained", "retained"]):
             with (
                 self.subTest(names=names),
@@ -68,7 +79,18 @@ class RepackageTests(unittest.TestCase):
             skipped = (UnsupportedPython("example", PythonVersion.PY310, ">=3.11"),)
             repackage(
                 (
-                    ("1", root / "first", Plan(Publication.BUILD, targets, skipped)),
+                    (
+                        "1",
+                        root / "first",
+                        Plan(
+                            Publication.BUILD,
+                            targets,
+                            skipped,
+                            tuple(
+                                BuildFingerprint(t.artifact, "b" * 64) for t in targets
+                            ),
+                        ),
+                    ),
                     ("2", root / "retry", Plan(Publication.BUILD, targets[1:])),
                 ),
                 root / "output",
@@ -76,6 +98,7 @@ class RepackageTests(unittest.TestCase):
             plan = load_plan(root / "output/build-plan.json")
             self.assertEqual(plan.targets, targets)
             self.assertEqual(plan.skipped, skipped)
+            self.assertEqual(plan.fingerprints, ())
             self.assertEqual(len(collect(root / "output/artifacts", plan)), 2)
             report = json.loads((root / "output/packaging-report.json").read_text())
             self.assertEqual([row["source_run"] for row in report], ["1", "2"])

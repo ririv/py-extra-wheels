@@ -12,7 +12,13 @@ from scripts.pipeline.compatibility import (
     SdistArchive,
     load_incompatibilities,
 )
-from scripts.pipeline.model import GitSource, Plan, Target, UnsupportedPython
+from scripts.pipeline.model import (
+    AlreadyPublished,
+    GitSource,
+    Plan,
+    Target,
+    UnsupportedPython,
+)
 from scripts.pipeline.source import resolve_legacy_sdist, resolve_source
 from scripts.recipes.load import load_recipes
 from scripts.recipes.model import (
@@ -157,6 +163,9 @@ def write_actions_plan(plan: Plan, path: Path, output: Path) -> None:
             f"matrix={json.dumps({'include': [{'batch': i} for i in range((len(plan.targets) + BATCH_SIZE - 1) // BATCH_SIZE)]}, separators=(',', ':'))}\n"
         )
         stream.write(f"has_jobs={str(bool(plan.targets)).lower()}\n")
+        stream.write(
+            f"has_reused={str(any(isinstance(s, AlreadyPublished) for s in plan.skipped)).lower()}\n"
+        )
         stream.write(f"publication={plan.publication.value}\n")
 
 

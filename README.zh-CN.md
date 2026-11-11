@@ -64,7 +64,7 @@ GitHub Actions 执行统一流水线：
 
 对于使用已支持构建后端的包，新增 `recipes/<package-name>.toml`，声明 Git 仓库和 ref 或固定版本的 PyPI 官方 sdist、项目目录、构建后端及 Android 目标。TOML 也支持配置外部环境、PEP 517 参数和原生依赖。新的构建后端需先接入相应构建器。
 
-所有 recipe 共用统一工作流。recipe 变更合入 `main` 后构建对应包；共享构建代码变更后重建全部 recipe。
+所有 recipe 共用统一工作流。recipe 变更后检查对应包；共享代码变更后检查全部 recipe。构建指纹一致且已发布 wheel 的 Git blob 匹配时跳过该目标，使用 `rebuild=force` 可强制重建所选目标。历史 wheel 需要先完成一次带记录的构建才能参与复用。
 
 例如，构建两个 Python 版本，并将结果保留为 Actions 产物：
 

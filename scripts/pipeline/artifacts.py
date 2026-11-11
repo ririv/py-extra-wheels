@@ -7,7 +7,7 @@ from pathlib import Path
 from wheel.cli.tags import tags
 
 from scripts.build.wheel_licenses import attach_bundled_licenses
-from scripts.pipeline.model import Plan, Target
+from scripts.pipeline.model import BuildFingerprint, Plan, Target
 from scripts.pipeline.wheel import normalized, verify_wheel
 
 
@@ -16,7 +16,9 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def record(directory: Path, target: Target) -> None:
+def record(
+    directory: Path, target: Target, identity: BuildFingerprint | None = None
+) -> None:
     wheels = sorted(directory.glob("*.whl"))
     if len(wheels) != 1:
         raise ValueError(
@@ -36,7 +38,12 @@ def record(directory: Path, target: Target) -> None:
     verify_wheel(wheel, target)
     (directory / "manifest.json").write_text(
         json.dumps(
-            {"target": target.to_dict(), "wheel": wheel.name, "sha256": digest(wheel)},
+            {
+                "target": target.to_dict(),
+                "wheel": wheel.name,
+                "sha256": digest(wheel),
+                **({"fingerprint": identity.sha256} if identity is not None else {}),
+            },
             indent=2,
         )
         + "\n",
@@ -52,9 +59,14 @@ def collect(directory: Path, plan: Plan) -> dict[str, Path]:
             f"产物集合不完整：缺少 {sorted(expected - actual)}，多余 {sorted(actual - expected)}"
         )
     result = {}
+    identities = {identity.artifact: identity for identity in plan.fingerprints}
     for target in plan.targets:
         artifact = directory / target.artifact
         wheel = artifact_wheel(artifact, target)
+        if identity := identities.get(target.artifact):
+            manifest = json.loads((artifact / "manifest.json").read_text())
+            if manifest.get("fingerprint") != identity.sha256:
+                raise ValueError(f"产物构建指纹与计划不一致：{target.artifact}")
         verify_wheel(wheel, target)
         key = f"{normalized(target.library)}/{wheel.name}"
         if key in result and digest(result[key]) != digest(wheel):
